@@ -1,4 +1,4 @@
-# MMBeans (Multi-diMensional Bay\textit{e}sian nonp\textit{a}rametric \textit{n}etwork \textit{s}ubtyping)
+# MMBeans (Multi-diMensional Bay*e*sian nonp*a*rametric *n*etwork *s*ubtyping)
 
 
 # Description
