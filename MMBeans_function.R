@@ -1,8 +1,7 @@
 MMBeans <- function(X, PP, H, alpha, lam, mu0, sig0, dir_phi,
-                                    alpha_sigma, beta_sigma, EI, b, W=1, maxit=100){
-  ###
-  # multi quantitative task; with propensity score; fixed gamma selection across H
-  
+                    alpha_sigma, beta_sigma, EI, b, 
+                    W=1, maxit=100, ELBO_tol = 1e-4){
+
   ## Args:
   # X : c(p, p, n, M) quantitative array
   # EI: c(n, H) matrix, initial start for subject cluster
@@ -12,9 +11,10 @@ MMBeans <- function(X, PP, H, alpha, lam, mu0, sig0, dir_phi,
   # sig0: variance for noisy features
   # dir_phi: K-vector hyper-parameter for tau's dirichlet distribution
   # alpha_sigma: hyperparameter of inverse-gamma distribution for variance
-  # betaa_sigma: hyperparameter of inverse-gamma distribution for variance
+  # beta_sigma: hyperparameter of inverse-gamma distribution for variance
   # W: optional weights for subjects, default is 1
   # maxit: maximum iterations
+  # ELBO_tol: 
   
   t0 <- Sys.time()
   M <- dim(X)[4]
@@ -160,29 +160,10 @@ MMBeans <- function(X, PP, H, alpha, lam, mu0, sig0, dir_phi,
     for(h in 1:H){
       cbase_arr[, , h, ] <- cbase
     }
-    # for(mi in 1:M){
-    #   if(length(which(apply(cbase[, , mi], 1, sum)==0))>0){
-    #     col_zero <- row_zero <- which(apply(cbase[, , mi], 1, sum)==0)
-    #     min_cbase <- min(cbase[-row_zero, -col_zero, mi])
-    #     max_cbase <- max(cbase[-row_zero, -col_zero, mi])
-    #     norm_cbase <- (cbase[, , mi] - min_cbase)/(max_cbase - min_cbase)*20-10
-    #     norm_cbase[row_zero, ] <- 0
-    #     norm_cbase[, col_zero] <- 0
-    #   }else{
-    #     min_cbase <- min(cbase[, , mi])
-    #     max_cbase <- max(cbase[, , mi])
-    #     norm_cbase <- (cbase[, , mi] - min_cbase)/(max_cbase - min_cbase)*20-10
-    #   }
-    #   cbase[, , mi] <- norm_cbase
-    #   for(h in 1:H){
-    #     cbase_arr[, , h, mi] <- norm_cbase
-    #   }
-    # }
     
     old_cbase <- now_cbase
     now_cbase <- cbase_arr
     Egam <- 1/(1 + exp(-cbase_arr))
-    
     
     # b: subtyping
     old_b <- b
@@ -281,25 +262,34 @@ MMBeans <- function(X, PP, H, alpha, lam, mu0, sig0, dir_phi,
       tmp5 <- sum(matrix(Elp_XsqPPsum[, , , mi], ncol = n) %*% EIW * (matrix((-d[, , , mi]/r[, , , mi]/2), ncol = H)) * matrix(Egam[, , 1, mi], ncol = H, nrow = K*K))
       # (K*K, n) %*% (n, H) * (K*K, H) * (K*K, H)
       tmp6 <- sum(matrix(Elp_XPPsum[, , , mi], ncol = n) %*% EIW * (matrix((d[, , , mi]*m[, , , mi]/r[, , , mi]), ncol = H)) * matrix(Egam[, , 1, mi], ncol = H, nrow = K*K))
+
+      tmp7 <- sum(EIW * sum(Elp_PPPP[, , , mi]) * log(1/sqrt(2*pi)))
       
-      ElogP_X <- ElogP_X + tmp1 + tmp2 + tmp3 + tmp4 + tmp5 + tmp6
+      ElogP_X <- ElogP_X + tmp1 + tmp2 + tmp3 + tmp4 + tmp5 + tmp6 + tmp7
     }
-    ElogP_Xi <- 0 # Eq(logP(Xi))
-    ElogP_Xi <- ElogP_Xi + sum(EIW %*% (Elw + cumEl1w[-H-1])) # Eq[logP(Z|w)]
-    for(j in 1:p){ElogP_Xi <- ElogP_Xi + sum(PP[j, , ]*Eltao)} # Eq[logP(G|tau)]
-    ElogP_Xi <- ElogP_Xi + sum((3/2+alpha_sigma-beta_sigma)*Elsig-1/2) # Eq[logPmusig]
-    ElogP_Xi <- ElogP_Xi + sum((alpha - 1) * El1w[-H]) # Eq[logP(w)]
-    ElogP_Xi <- ElogP_Xi + sum(dir_phi * Eltao) # Eq[logP(phi|tau)]
+    ElogP_Xi_Z <- sum(EIW %*% (Elw + cumEl1w[-H-1])) # Eq[logP(Z|w)]
+    ElogP_Xi_G <- 0
+    for(j in 1:p){ElogP_Xi_G <- ElogP_Xi_G + sum(PP[j, , ]*Eltao)} # Eq[logP(G|tau)]
+    ElogP_Xi_musig <- sum(-(3/2+alpha_sigma/2)*Elsig-beta_sigma/2*d/r-lam/2*(1/v + m^2*d/r)) # Eq[logPmusig]
+    ElogP_Xi_w <- sum((alpha - 1) * El1w[-H]) # Eq[logP(w)]
+    ElogP_Xi_phi <- sum((dir_phi-1) * Eltao) # Eq[logP(phi|tau)]
     
+    ElogP_Xi <- ElogP_Xi_Z + ElogP_Xi_G + ElogP_Xi_musig + ElogP_Xi_w + ElogP_Xi_phi
     ElogP_X_Xi <- ElogP_X + ElogP_Xi
     
-    ElogQ <- sum(EIW * b) + sum((f-1)*Elw + (g-1)*El1w, na.rm = T) +
-      sum(Egam[, , 1, ]*cbase - cbase) +
-      # should be log(1 + exp(cbase)), but when cbase is large, exp(cbase) = inf, which cause problem
-      sum(-(d/2 + 1)*Elsig - d/2) +
-      sum(-1/2*Elsig - 1) +
-      sum((dir_phi_ti - 1)*Eltao) +
-      sum(PP * log(PP), na.rm = T)
+    ElogQ_Z <- sum(EIW * sweep(b, 1, log(apply(exp(b), 1, sum)), `-`))
+    ElogQ_G <- sum(PP * log(PP), na.rm = T)
+    ElogQ_musig <- sum(1/2*log(v) + d/2*log(r/2)-lgamma(d/2)-(3/2 + d/2)*Elsig - d/2-1/2)
+    ElogQ_w <- sum((f-1)*Elw + (g-1)*El1w - lgamma(f) - lgamma(g) + lgamma(f+g), na.rm = T)
+    ElogQ_phi <- 0
+    for(mi in 1:M){ElogQ_phi <- ElogQ_phi + sum((dir_phi_ti[,mi] - 1)*Eltao[,mi])*(-sum(lgamma(dir_phi_ti[,mi])) + lgamma(sum(dir_phi_ti[,mi])))}
+    ElogQ_gamma <- 0
+    if(any(exp(cbase) == Inf)){
+      ElogQ_gamma <- sum(Egam[, , 1, ]*cbase - cbase)
+    }else{
+      ElogQ_gamma <- sum(Egam[, , 1, ]*cbase - log(1 + exp(cbase)))
+    }
+    ElogQ <- ElogQ_Z + ElogQ_G + ElogQ_musig + ElogQ_w + ElogQ_phi + ElogQ_gamma
     
     ElogP_list <- c(ElogP_list, ElogP_X)
     ElogP_X_Xi_list <- c(ElogP_X_Xi_list, ElogP_X_Xi)
