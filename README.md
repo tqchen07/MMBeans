@@ -8,4 +8,4 @@ We developed MMBeans by integrating multi-state stochastic block models (SBMs) i
 The MMBeans_function.R script contains the VI algorithm for the MMBeans model, while simulation_example.R demonstrates how to implement MMBeans.
 
 # Reference
-Chen, Tianqi, Chichun Tan, Hongyu Zhao, Todd Constable, Sarah Yip, and Yize Zhao (2023). Bayesian subtyping for multi-state brain functional connectome with application on adolescent brain cognition.
+Tianqi Chen, Chichun Tan, Hongyu Zhao, Todd Constable, Sarah Yip, and Yize Zhao (2023). Bayesian subtyping for multi-state brain functional connectome with application on adolescent brain cognition.
